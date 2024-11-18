@@ -1,0 +1,95 @@
+import streamlit as st
+import pandas as pd
+import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+import base64
+
+# Title
+st.title("AI Agent Dashboard")
+
+# File Upload
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
+    st.write("Data Preview:")
+    st.write(data.head())
+    column = st.selectbox("Select Primary Column for Entity Names", data.columns)
+else:
+    st.write("No file uploaded yet.")
+
+# Email Integration
+email_choice = st.selectbox("Choose Email Provider", ["None", "Gmail", "SMTP"])
+
+if email_choice == "Gmail":
+    st.write("Connect to Gmail using OAuth2 for sending emails.")
+    
+    # OAuth2 Flow for Gmail
+    def authenticate_gmail():
+        SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'credentials.json', SCOPES)
+        creds = flow.run_local_server(port=0)
+        return creds
+
+    def send_email_gmail(creds, subject, body, to_email):
+        try:
+            service = build('gmail', 'v1', credentials=creds)
+            message = MIMEText(body)
+            message['to'] = to_email
+            message['subject'] = subject
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+            send_message = service.users().messages().send(userId="me", body={'raw': raw_message}).execute()
+            return send_message
+        except Exception as e:
+            return f"An error occurred: {e}"
+
+    creds = authenticate_gmail()
+    subject = st.text_input("Enter Email Subject")
+    body = st.text_area("Enter Email Body")
+    to_email = st.text_input("Recipient Email")
+
+    if st.button("Send Email"):
+        response = send_email_gmail(creds, subject, body, to_email)
+        st.write(response)
+
+elif email_choice == "SMTP":
+    st.write("Configure SMTP settings for sending emails.")
+    
+    smtp_server = st.text_input("SMTP Server (e.g., smtp.gmail.com)")
+    port = st.number_input("SMTP Port", value=587)
+    sender_email = st.text_input("Sender Email")
+    sender_password = st.text_input("Sender Password", type="password")
+    subject = st.text_input("Enter Email Subject")
+    body = st.text_area("Enter Email Body")
+    to_email = st.text_input("Recipient Email")
+
+    def send_email_smtp(smtp_server, port, sender_email, sender_password, subject, body, to_email):
+        try:
+            server = smtplib.SMTP(smtp_server, port)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            
+            message = MIMEMultipart()
+            message['From'] = sender_email
+            message['To'] = to_email
+            message['Subject'] = subject
+            message.attach(MIMEText(body, 'plain'))
+            
+            server.sendmail(sender_email, to_email, message.as_string())
+            server.quit()
+            return "Email sent successfully!"
+        except Exception as e:
+            return f"An error occurred: {e}"
+
+    if st.button("Send Email"):
+        response = send_email_smtp(smtp_server, port, sender_email, sender_password, subject, body, to_email)
+        st.write(response)
+
+else:
+    st.write("No email provider selected.")
