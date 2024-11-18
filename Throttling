@@ -1,0 +1,97 @@
+import streamlit as st
+import pandas as pd
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from email.mime.text import MIMEText
+import base64
+import time
+from datetime import datetime, timedelta
+
+# Title
+st.title("AI Agent Dashboard")
+
+# File Upload
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
+    st.write("Data Preview:")
+    st.write(data.head())
+
+    # Display columns to insert as placeholders
+    st.write("Available Columns for Placeholders:")
+    st.write(", ".join(f"{{{{{col}}}}}" for col in data.columns))
+
+    column = st.selectbox("Select Primary Column for Entity Names", data.columns)
+else:
+    st.write("No file uploaded yet.")
+
+# Gmail OAuth Authentication
+def authenticate_gmail():
+    SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+    creds = flow.run_local_server(port=0)
+    return creds
+
+# Send Email Function
+def send_email_gmail(creds, subject, body, to_email):
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+        message = MIMEText(body)
+        message['to'] = to_email
+        message['subject'] = subject
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        send_message = service.users().messages().send(userId="me", body={'raw': raw_message}).execute()
+        return "Email sent successfully!"
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return f"An error occurred: {e}"
+
+# Email Input Fields
+subject = st.text_input("Enter Email Subject")
+body = st.text_area("Enter Email Body (use placeholders like {ColumnName})")
+
+# Throttling and Scheduling Inputs
+send_rate_limit = st.number_input("Emails per minute (for throttling)", min_value=1, value=10)
+
+# Authenticate and Send Emails with Scheduling and Throttling
+def send_scheduled_emails(schedule_time_intervals):
+    creds = authenticate_gmail()  # Authenticate once
+    for interval in schedule_time_intervals:
+        scheduled_time = datetime.now() + timedelta(minutes=interval)
+        delay = (scheduled_time - datetime.now()).total_seconds()
+        st.write(f"Emails will be sent at: {scheduled_time.strftime('%H:%M:%S')}")
+        time.sleep(delay)
+
+        for index, row in data.iterrows():
+            to_email = row.get('Email', '').strip()  # Ensure the correct column name 'Email' is in your CSV
+            if not to_email:
+                st.write(f"No recipient email found for row {index}, skipping this entry.")
+                continue
+
+            # Replace placeholders with data from the row
+            email_body = body
+            for col in data.columns:
+                email_body = email_body.replace(f"{{{col}}}", str(row[col]))
+
+            # Debugging output
+            print(f"Sending email to: {to_email}")
+            print(f"Email body: {email_body}")
+
+            # Send email and display the response
+            response = send_email_gmail(creds, subject, email_body, to_email)
+            st.write(f"Email to {to_email}: {response}")
+
+            # Throttling: Wait for the next email based on the send rate limit
+            if (index + 1) % send_rate_limit == 0:
+                st.write(f"Pausing for 60 seconds...")
+                time.sleep(60)  # Pause for 60 seconds to avoid hitting the rate limit
+
+        st.write(f"Emails for {interval} minutes interval sent!")
+
+    st.write("All scheduled emails sent!")
+
+# Trigger the email sending process
+if st.button("Authenticate and Send Scheduled Emails"):
+    schedule_time_intervals = [5, 10, 30]
+    send_scheduled_emails(schedule_time_intervals)
