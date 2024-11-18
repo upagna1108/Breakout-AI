@@ -1,0 +1,29 @@
+import streamlit as st
+import pandas as pd
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+st.title("AI Agent Dashboard")
+
+# File Upload
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
+    st.write("Data Preview:")
+    st.write(data.head())
+    
+    # Select Primary Column
+    column = st.selectbox("Select Primary Column for Entity Names", data.columns)
+else:
+    st.write("Or connect to Google Sheets by providing credentials and sheet ID")
+
+# Google Sheets Connection
+sheet_id = st.text_input("Enter Google Sheet ID")
+if sheet_id:
+    creds = Credentials.from_service_account_file('path/to/credentials.json')
+    service = build('sheets', 'v4', credentials=creds)
+    sheet = service.spreadsheets()
+    # Load data from Google Sheets
+    data = sheet.values().get(spreadsheetId=sheet_id, range="Sheet1").execute()
+
