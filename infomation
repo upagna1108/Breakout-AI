@@ -1,0 +1,102 @@
+import streamlit as st
+import pandas as pd
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from email.mime.text import MIMEText
+import base64
+import time
+from datetime import datetime, timedelta
+
+# Title
+st.title("Custom Email Sender with Dashboard")
+
+# File Upload
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
+    st.write("Data Preview:")
+    st.write(data.head())
+
+    # Display columns to insert as placeholders
+    st.write("Available Columns for Placeholders:")
+    st.write(", ".join(f"{{{{{col}}}}}" for col in data.columns))
+
+    column = st.selectbox("Select Primary Column for Entity Names", data.columns)
+else:
+    st.write("No file uploaded yet.")
+
+# Gmail OAuth Authentication
+def authenticate_gmail():
+    SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+    creds = flow.run_local_server(port=0)
+    return creds
+
+# Send Email Function
+def send_email_gmail(creds, subject, body, to_email):
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+        message = MIMEText(body)
+        message['to'] = to_email
+        message['subject'] = subject
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        send_message = service.users().messages().send(userId="me", body={'raw': raw_message}).execute()
+        return "Email sent successfully!"
+    except Exception as e:
+        return f"An error occurred: {e}"
+
+# Email Input Fields
+subject = st.text_input("Enter Email Subject")
+body = st.text_area("Enter Email Body (use placeholders like {ColumnName})")
+
+# Real-Time Dashboard
+status_placeholder = st.empty()
+progress_bar = st.progress(0)
+
+# Authenticate and Send Emails
+if st.button("Authenticate and Send All Emails"):
+    creds = authenticate_gmail()  # Authenticate once
+    total_emails = len(data)
+    successful_emails = 0
+
+    for index, row in data.iterrows():
+        to_email = row.get('Email', '').strip()  # Ensure the correct column name 'Email' is in your CSV
+
+        # Skip if no email is found for this row
+        if not to_email:
+            st.write(f"No recipient email found for row {index}, skipping this entry.")
+            continue
+
+        # Replace placeholders with data from the row
+        email_body = body
+        for col in data.columns:
+            email_body = email_body.replace(f"{{{col}}}", str(row[col]))
+
+        # Send email and display the response
+        response = send_email_gmail(creds, subject, email_body, to_email)
+        st.write(f"Email to {to_email}: {response}")
+
+        if "Email sent successfully!" in response:
+            successful_emails += 1
+
+        # Update progress bar and status
+        progress = (index + 1) / total_emails
+        progress_bar.progress(progress)
+        status_placeholder.text(f"Sent {successful_emails}/{total_emails} emails")
+
+    status_placeholder.text(f"Finished sending emails: {successful_emails}/{total_emails} successful")
+
+# Display real-time tracking information
+st.write("Real-Time Dashboard for Email Status and Tracking")
+# Example static data for illustration
+tracking_data = {
+    'Company Name': ['ABC Corp', 'XYZ Ltd', 'DEF Inc'],
+    'Email': ['contact@abccorp.com', 'info@xyzltd.co.uk', 'hello@definc.com'],
+    'Status': ['Sent', 'Scheduled', 'Failed'],
+    'Delivery Status': ['Delivered', 'N/A', 'Bounced'],
+    'Opened': [True, False, False]
+}
+
+df_tracking = pd.DataFrame(tracking_data)
+st.write(df_tracking)
